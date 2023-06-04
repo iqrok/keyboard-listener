@@ -1,0 +1,21 @@
+{
+  "name": "keyboard-listener",
+  "version": "0.1.0",
+  "description": "Keyboard evdev event listener",
+  "main": "keyboardListener.lib.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/iqrok/keyboard-listener"
+  },
+  "keywords": [
+    "keyboard",
+    "evdev"
+  ],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+  }
+}
