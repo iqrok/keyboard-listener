@@ -1,5 +1,5 @@
 const fs = require('fs');
-const filepath = '/dev/input/event5';
+const filepath = process.argv[2] || '/dev/input/event5';
 const KeyboarListener = require('.');
 
 const keyboard = new KeyboarListener();
