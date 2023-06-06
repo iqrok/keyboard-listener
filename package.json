@@ -1,5 +1,5 @@
 {
-  "name": "keyboard-listener",
+  "name": "@iqrok/keyboard-listener",
   "version": "0.1.0",
   "description": "Keyboard evdev event listener",
   "main": "keyboardListener.lib.js",
@@ -14,7 +14,7 @@
     "keyboard",
     "evdev"
   ],
-  "author": "",
+  "author": "iqrok",
   "license": "MIT",
   "dependencies": {
   }
