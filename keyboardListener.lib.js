@@ -1,6 +1,9 @@
 const fs = require('fs');
 const EventEmitter = require('events');
 
+/**
+ * @class _KeyboardListener
+ * */
 class _KeyboardListener extends EventEmitter {
 	static Constants = {
 		Event: require(`${__dirname}/constant/events.constant.js`),
@@ -15,19 +18,25 @@ class _KeyboardListener extends EventEmitter {
 		if(options) self.init(options);
 	}
 
+	/**
+	 * Check system architecture is 64-bit or 32-bit.
+	 * Byte size for 'long' is different between 64 and 32 bit.
+	 * It's used to determine input event struct size which has timespec variable.
+	 * The struct for input event is shown below
+	 *
+	 * struct input_event {
+	 * 	struct timeval time;
+	 * 	__u16 type;
+	 * 	__u16 code;
+	 * 	__s32 value;
+	 * };
+	 *
+	 * @private
+	 * */
 	_detectSytem(){
 		const self = this;
 
 		const is64bit = process.arch.includes('64');
-
-		/**
-		 * struct input_event {
-		 * 	struct timeval time;
-		 * 	__u16 type;
-		 * 	__u16 code;
-		 * 	__s32 value;
-		 * };
-		 * */
 		self._SysInfo = {
 			is64bit,
 			size: {
@@ -38,6 +47,12 @@ class _KeyboardListener extends EventEmitter {
 		};
 	}
 
+	/**
+	 * Initialize class properies
+	 * @params {Object} options - configuration
+	 * @params {string} options.path - Path to selected input event device
+	 * @params {Object} [options.readline] - if defined, then will activated parse by line
+	 * */
 	init(options = {}){
 		const self = this;
 
@@ -48,6 +63,12 @@ class _KeyboardListener extends EventEmitter {
 		return self;
 	}
 
+	/**
+	 * Parse incoming data into delimited string
+	 * @params {string} [options.delimiter='\n'] - delimiter character
+	 * @params {string} [options.on='keydown'] - read character on 'keydown' or 'keyup'
+	 * @params {number} [options.debounce=100] - delay in ms between line to avoid double line reading
+	 * */
 	readline(options = {}){
 		const self = this;
 
@@ -70,6 +91,9 @@ class _KeyboardListener extends EventEmitter {
 		return self;
 	}
 
+	/**
+	 * Start listener
+	 * */
 	async open(){
 		const self = this;
 
@@ -85,6 +109,13 @@ class _KeyboardListener extends EventEmitter {
 		return self;
 	}
 
+	/**
+	 * Parse incoming buffer.
+	 * Received bytes might contains more than just one input event.
+	 * each parsed event will be passed to _parseInput.
+	 * @private
+	 * @params {Buffer} buffer - received bytes
+	 * */
 	_parseBuffer(buffer){
 		const self = this;
 
@@ -108,6 +139,13 @@ class _KeyboardListener extends EventEmitter {
 		}
 	}
 
+	/**
+	 * Parse an input event.
+	 * If readline is active, then on every 'EV_KEY' event will be passed to _parseLine.
+	 * @private
+	 * @fires _KeyboardListener#data
+	 * @params {Object} data - input event struct as an object
+	 * */
 	_parseInput(data){
 		const self = this;
 
@@ -119,11 +157,26 @@ class _KeyboardListener extends EventEmitter {
 			value: data.value,
 		};
 
+		/**
+		 * Input event
+		 * @event _KeyboardListener#data
+		 * @type {Object}
+		 * @property {string} type - input event type
+		 * @property {string|number} code - input event code
+		 * @property {number} value - input event value
+		 * */
 		self.emit('data', res);
 
 		if(self._line && res.type === 'EV_KEY') self._parseLine(res);
 	}
 
+	/**
+	 * Parse an keypress input event into corresponding keyboard key's character.
+	 * Emit event if delimiter character is found.
+	 * @private
+	 * @fires _KeyboardListener#readline
+	 * @params {Object} data - parsed input event
+	 * */
 	_parseLine(data){
 		const self = this;
 
@@ -156,6 +209,12 @@ class _KeyboardListener extends EventEmitter {
 
 		if(char === delimiter) {
 			if(self._line.timer.diff > self._line.debounce){
+
+				/**
+				 * Readline event
+				 * @event _KeyboardListener#readline
+				 * @param {string} - delimited string
+				 * */
 				self.emit('readline', self._line.message);
 			}
 
