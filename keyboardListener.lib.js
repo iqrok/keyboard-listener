@@ -1,6 +1,8 @@
 const fs = require('fs');
 const EventEmitter = require('events');
 
+const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
+
 /**
  * @class _KeyboardListener
  * */
@@ -51,6 +53,7 @@ class _KeyboardListener extends EventEmitter {
 	 * Initialize class properies
 	 * @params {Object} options - configuration
 	 * @params {string} options.path - Path to selected input event device
+	 * @params {number} [options.interval=1000] - interval between attempt to check dev path is accessible, in ms
 	 * @params {Object} [options.readline] - if defined, then will activated parse by line
 	 * */
 	init(options = {}){
@@ -58,6 +61,7 @@ class _KeyboardListener extends EventEmitter {
 
 		self._detectSytem();
 		self._path = options.path;
+		self._interval = options.interval || 1000;
 		if(options.readline) self.readline(options.readline);
 
 		return self;
@@ -97,14 +101,32 @@ class _KeyboardListener extends EventEmitter {
 	async open(){
 		const self = this;
 
+		self.isOpen = false;
+
+		// wait until dev path exist
+		while(!self.isOpen){
+			self.isOpen = await fs.promises.stat(self._path)
+				.then(error => true)
+				.catch(error => false);
+
+			// no need to sleep if path is accessible
+			if(!self.isOpen) await sleep(self._interval);
+		}
+
 		self._stream = fs.createReadStream(self._path, {
-				flags: 'r',
-				encoding: null,
-			})
+					flags: 'r',
+					encoding: null,
+				})
 			.on('data', buffer => self._parseBuffer(buffer))
-			.on('error', error => {
-				throw error;
-			});
+			.on('error', error => self.emit('error', error))
+			.on('open', () => self.emit('open'))
+			.on('close', () => {
+					self.emit('close');
+					delete self._stream;
+
+					// reopen the read stream
+					self.open();
+				});
 
 		return self;
 	}

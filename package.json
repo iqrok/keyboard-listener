@@ -1,6 +1,6 @@
 {
 	"name": "@iqrok/keyboard-listener",
-	"version": "0.1.0",
+	"version": "0.1.1",
 	"description": "Keyboard evdev event listener",
 	"main": "keyboardListener.lib.js",
 	"files": [
@@ -8,7 +8,6 @@
 		"keyboardListener.lib.js"
 	],
 	"scripts": {
-		"test": "echo \"Error: no test specified\" && exit 1"
 	},
 	"repository": {
 		"type": "git",
