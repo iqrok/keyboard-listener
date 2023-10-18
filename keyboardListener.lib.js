@@ -60,8 +60,10 @@ class _KeyboardListener extends EventEmitter {
 		const self = this;
 
 		self._detectSytem();
-		self._path = options.path;
-		self._interval = options.interval || 1000;
+
+		self.setPath(options.path);
+		self.setInterval(options.interval);
+
 		if(options.readline) self.readline(options.readline);
 
 		return self;
@@ -96,12 +98,65 @@ class _KeyboardListener extends EventEmitter {
 	}
 
 	/**
+	 * set ms interval between attempt to open path
+	 * @params {number} [ms=1000] - interval in milliseconds
+	 * */
+	setInterval(ms = 1000){
+		const self = this;
+
+		self._interval = ms;
+		return self;
+	}
+
+	/**
+	 * set dev input path to listen
+	 * @params {string} devpath - path to dev input
+	 * */
+	setPath(devpath){
+		const self = this;
+
+		self._path = devpath;
+		return self;
+	}
+
+	/**
+	 * restart listener, if devpath is defined, then open new stream with that path
+	 * @params {string} [devpath] - new devpath if needed
+	 * */
+	 async restart(devpath){
+		const self = this;
+
+		await self.close();
+		if(typeof(devpath) === 'string') self.setPath(devpath);
+
+		return self.open();
+	 }
+
+	/**
+	 * Stop listener and remove handlers
+	 * */
+	async close(){
+		const self = this;
+
+		if(!self.isOpen) return self;
+
+		self._forceClose = true;
+		self.isOpen = false;
+
+		// readStream is auto closed when file handle is closed
+		self._fd.close();
+
+		return self;
+	}
+
+	/**
 	 * Start listener
 	 * */
 	async open(){
 		const self = this;
 
 		self.isOpen = false;
+		self._forceClose = false;
 
 		// wait until dev path exist
 		while(!self.isOpen){
@@ -113,20 +168,21 @@ class _KeyboardListener extends EventEmitter {
 			if(!self.isOpen) await sleep(self._interval);
 		}
 
-		self._stream = fs.createReadStream(self._path, {
-					flags: 'r',
-					encoding: null,
-				})
-			.on('data', buffer => self._parseBuffer(buffer))
-			.on('error', error => self.emit('error', error))
-			.on('open', () => self.emit('open'))
+		self._fd = (await fs.promises.open(self._path, 'r'))
 			.on('close', () => {
-					self.emit('close');
+					console.log('closing');
+					self.emit('close', self._path);
 					delete self._stream;
 
-					// reopen the read stream
-					self.open();
+					// reopen the read stream, if not forced
+					if(!self._forceClose) self.open();
 				});
+
+		self._stream = self._fd.createReadStream({ encoding: null })
+			.on('data', buffer => self._parseBuffer(buffer))
+			.on('error', error => self.emit('error', error));
+
+		self.emit('open', self._path)
 
 		return self;
 	}
