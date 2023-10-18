@@ -13,6 +13,38 @@ class _KeyboardListener extends EventEmitter {
 		Character: require(`${__dirname}/constant/characters.constant.js`),
 	};
 
+	/**
+	 * List all available device paths from devpath
+	 * @static
+	 * @params {Regex} [regex] - regex to filter outpur
+	 * @params {string} [devpath=/dev/path] - parent path to read
+	 * @returns {string[]} list of available paths
+	 * */
+	static async listDevice(regex, devpath = '/dev/input'){
+		const devices = [];
+
+		const exists = await fs.promises.stat(devpath)
+			.then(error => true)
+			.catch(error => false);
+
+		if(!exists) return devices;
+
+		const list = await fs.promises.readdir(devpath, {
+				recursive: true,
+				withFileTypes: true,
+			});
+
+		for(const item of list){
+			const fullpath = `${item.path}/${item.name}`;
+			const valid = item.isCharacterDevice() || item.isSymbolicLink();
+			const filtered = regex === undefined ? true : fullpath.match(regex);
+
+			if(valid && filtered) devices.push(fullpath);
+		}
+
+		return devices;
+	}
+
 	constructor(options){
 		super();
 
