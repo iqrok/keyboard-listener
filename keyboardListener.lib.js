@@ -11,7 +11,44 @@ class _KeyboardListener extends EventEmitter {
 		Event: require(`${__dirname}/constant/events.constant.js`),
 		Key: require(`${__dirname}/constant/keys.constant.js`),
 		Character: require(`${__dirname}/constant/characters.constant.js`),
+		ErrorCode: {
+				BlockedClosing: 0x01,
+				MaxOpenAttempt: 0x02,
+				Stream: 0x04,
+			},
 	};
+
+	/**
+	 * List all available device paths from devpath
+	 * @static
+	 * @params {Regex} [regex] - regex to filter outpur
+	 * @params {string} [devpath=/dev/path] - parent path to read
+	 * @returns {string[]} list of available paths
+	 * */
+	static async listDevice(regex, devpath = '/dev/input'){
+		const devices = [];
+
+		const exists = await fs.promises.stat(devpath)
+			.then(error => true)
+			.catch(error => false);
+
+		if(!exists) return devices;
+
+		const list = await fs.promises.readdir(devpath, {
+				recursive: true,
+				withFileTypes: true,
+			});
+
+		for(const item of list){
+			const fullpath = `${item.path}/${item.name}`;
+			const valid = item.isCharacterDevice() || item.isSymbolicLink();
+			const filtered = regex === undefined ? true : fullpath.match(regex);
+
+			if(valid && filtered) devices.push(fullpath);
+		}
+
+		return devices;
+	}
 
 	constructor(options){
 		super();
@@ -60,8 +97,10 @@ class _KeyboardListener extends EventEmitter {
 		const self = this;
 
 		self._detectSytem();
-		self._path = options.path;
-		self._interval = options.interval || 1000;
+
+		self.setPath(options.path);
+		self.setInterval(options.interval);
+
 		if(options.readline) self.readline(options.readline);
 
 		return self;
@@ -96,12 +135,86 @@ class _KeyboardListener extends EventEmitter {
 	}
 
 	/**
+	 * set ms interval between attempt to open path
+	 * @params {number} [ms=1000] - interval in milliseconds
+	 * */
+	setInterval(ms = 1000){
+		const self = this;
+
+		self._interval = ms;
+		return self;
+	}
+
+	/**
+	 * set dev input path to listen
+	 * @params {string} devpath - path to dev input
+	 * */
+	setPath(devpath){
+		const self = this;
+
+		self._path = devpath;
+		return self;
+	}
+
+	/**
+	 * restart listener, if devpath is defined, then open new stream with that path
+	 * @params {string} [devpath] - new devpath if needed
+	 * */
+	 async restart(devpath){
+		const self = this;
+
+		await self.close();
+
+		if(typeof(devpath) === 'string') self.setPath(devpath);
+
+		return self.open();
+	 }
+
+	/**
+	 * Stop listener and remove handlers
+	 * */
+	async close(){
+		const self = this;
+
+		if(!self.isOpen) return self;
+
+		self._forceClose = true;
+		self.isOpen = false;
+
+		// https://nodejs.org/api/fs.html#filehandlecreatereadstreamoptions
+		const { ErrorCode } = _KeyboardListener.Constants;
+		const blocked = setTimeout(
+			() => self.emit('error', {
+					code: ErrorCode.BlockedClosing,
+					error: 'Can\'t finish until data is available from old device',
+				}),
+			self._interval);
+
+		// read stream is auto closed when file handle is closed
+		await self._fd.close();
+
+		clearTimeout(blocked);
+
+		return self;
+	}
+
+	/**
 	 * Start listener
 	 * */
 	async open(){
 		const self = this;
 
+		// don't try to open if stream is already opened
+		if(self.isOpen) return self;
+
 		self.isOpen = false;
+		self._forceClose = false;
+
+		const attempt = {
+				counter: 0,
+				max: 5,
+			};
+		const { ErrorCode } = _KeyboardListener.Constants;
 
 		// wait until dev path exist
 		while(!self.isOpen){
@@ -110,23 +223,37 @@ class _KeyboardListener extends EventEmitter {
 				.catch(error => false);
 
 			// no need to sleep if path is accessible
-			if(!self.isOpen) await sleep(self._interval);
+			if(!self.isOpen) {
+				if(attempt.counter++ >= attempt.max){
+					attempt.counter = 0;
+					self.emit('error', {
+							code: ErrorCode.MaxOpenAttempt,
+							error: `Can\'t open '${self._path}'!`,
+						});
+				}
+
+				await sleep(self._interval);
+			}
+
+			if(self._forceClose) return self;
 		}
 
-		self._stream = fs.createReadStream(self._path, {
-					flags: 'r',
-					encoding: null,
-				})
-			.on('data', buffer => self._parseBuffer(buffer))
-			.on('error', error => self.emit('error', error))
-			.on('open', () => self.emit('open'))
+		self._fd = (await fs.promises.open(self._path, 'r'))
 			.on('close', () => {
-					self.emit('close');
-					delete self._stream;
+					self.emit('close', self._path);
 
-					// reopen the read stream
-					self.open();
+					// reopen the read stream, if not forced
+					if(!self._forceClose) self.open();
 				});
+
+		self._stream = self._fd.createReadStream({ encoding: null })
+			.on('data', buffer => self._parseBuffer(buffer))
+			.on('error', error => self.emit('error', {
+					code: ErrorCode.Stream,
+					error,
+				}));
+
+		self.emit('open', self._path);
 
 		return self;
 	}
