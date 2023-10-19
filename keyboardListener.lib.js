@@ -11,6 +11,11 @@ class _KeyboardListener extends EventEmitter {
 		Event: require(`${__dirname}/constant/events.constant.js`),
 		Key: require(`${__dirname}/constant/keys.constant.js`),
 		Character: require(`${__dirname}/constant/characters.constant.js`),
+		ErrorCode: {
+				BlockedClosing: 0x01,
+				MaxOpenAttempt: 0x02,
+				Stream: 0x04,
+			},
 	};
 
 	/**
@@ -159,6 +164,7 @@ class _KeyboardListener extends EventEmitter {
 		const self = this;
 
 		await self.close();
+
 		if(typeof(devpath) === 'string') self.setPath(devpath);
 
 		return self.open();
@@ -175,8 +181,19 @@ class _KeyboardListener extends EventEmitter {
 		self._forceClose = true;
 		self.isOpen = false;
 
-		// readStream is auto closed when file handle is closed
-		self._fd.close();
+		// https://nodejs.org/api/fs.html#filehandlecreatereadstreamoptions
+		const { ErrorCode } = _KeyboardListener.Constants;
+		const blocked = setTimeout(
+			() => self.emit('error', {
+					code: ErrorCode.BlockedClosing,
+					error: 'Can\'t finish until data is available from old device',
+				}),
+			self._interval);
+
+		// read stream is auto closed when file handle is closed
+		await self._fd.close();
+
+		clearTimeout(blocked);
 
 		return self;
 	}
@@ -190,6 +207,12 @@ class _KeyboardListener extends EventEmitter {
 		self.isOpen = false;
 		self._forceClose = false;
 
+		const attempt = {
+				counter: 0,
+				max: 5,
+			};
+		const { ErrorCode } = _KeyboardListener.Constants;
+
 		// wait until dev path exist
 		while(!self.isOpen){
 			self.isOpen = await fs.promises.stat(self._path)
@@ -197,14 +220,22 @@ class _KeyboardListener extends EventEmitter {
 				.catch(error => false);
 
 			// no need to sleep if path is accessible
-			if(!self.isOpen) await sleep(self._interval);
+			if(!self.isOpen) {
+				if(attempt.counter++ >= attempt.max){
+					attempt.counter = 0;
+					self.emit('error', {
+							code: ErrorCode.MaxOpenAttempt,
+							error: `Can\'t open '${self._path}'!`,
+						});
+				}
+
+				await sleep(self._interval);
+			}
 		}
 
 		self._fd = (await fs.promises.open(self._path, 'r'))
 			.on('close', () => {
-					console.log('closing');
 					self.emit('close', self._path);
-					delete self._stream;
 
 					// reopen the read stream, if not forced
 					if(!self._forceClose) self.open();
@@ -212,7 +243,10 @@ class _KeyboardListener extends EventEmitter {
 
 		self._stream = self._fd.createReadStream({ encoding: null })
 			.on('data', buffer => self._parseBuffer(buffer))
-			.on('error', error => self.emit('error', error));
+			.on('error', error => self.emit('error', {
+					code: ErrorCode.Stream,
+					error,
+				}));
 
 		self.emit('open', self._path)
 
