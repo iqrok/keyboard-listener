@@ -204,6 +204,9 @@ class _KeyboardListener extends EventEmitter {
 	async open(){
 		const self = this;
 
+		// don't try to open if stream is already opened
+		if(self.isOpen) return self;
+
 		self.isOpen = false;
 		self._forceClose = false;
 
@@ -231,6 +234,8 @@ class _KeyboardListener extends EventEmitter {
 
 				await sleep(self._interval);
 			}
+
+			if(self._forceClose) return self;
 		}
 
 		self._fd = (await fs.promises.open(self._path, 'r'))
@@ -248,7 +253,7 @@ class _KeyboardListener extends EventEmitter {
 					error,
 				}));
 
-		self.emit('open', self._path)
+		self.emit('open', self._path);
 
 		return self;
 	}
